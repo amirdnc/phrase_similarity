@@ -1,0 +1,16 @@
+*.tar
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.pth
+*.pyc
+*.pkl
+*.bin
+/data/*
+/data*
+/additional_models/biobert_v1.1_pubmed/*
+/__pycache__/*
+/.idea/*
+/results/*
