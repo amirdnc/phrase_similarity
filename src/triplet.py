@@ -22,12 +22,13 @@ def get_addtional_data(t):
 
 
 class TrippletModel(nn.Module):
-    def __init__(self, name, margin=0.2):
+    def __init__(self, name, margin=1):
         super(TrippletModel, self).__init__()
         # config = AutoConfig.from_pretrained(name)
         # self.model = AutoModel.from_config(config)
         self.model = AutoModelForMaskedLM.from_pretrained(name)
         self.loss = nn.TripletMarginLoss(margin=margin, p=2)
+        # self.hard_loss = nn.TripletMarginLoss(margin=margin*2, p=2)
         self.margin = margin
         self.drop = nn.Dropout(p=0.5)
 
@@ -57,6 +58,16 @@ class TrippletModel(nn.Module):
         else:
             return self.loss(p0, p1, n)
 
+    def double_loss(self, pos0, pos1, neg, neg2, pos0_i, pos1_i, neg_i, neg2_i, get_embedding=False):
+        p0 = self.forward(pos0, pos0_i)
+        p1 = self.forward(pos1, pos1_i)
+        n = self.forward(neg, neg_i)
+        n2 = self.forward(neg2, neg2_i)
+        if get_embedding:
+            return self.loss(p0, p1, n), p0, p1, n
+        else:
+            return self.loss(p0, p1, n) + self.loss(p0, n, n2)
+
     def run_train_multi(self, pos, neg, mask):
         ps = [self.forward(x, mask[0][:, j]) for (j, x) in enumerate(pos)]
         shuffle(ps)
@@ -78,6 +89,14 @@ class TrippletModel(nn.Module):
         shuffle(n_l)
         return self.run_train(pos[p_l[0]], pos[p_l[1]], neg[n_l[0]], mask[0][:, p_l[0]], mask[0][:, p_l[1]], mask[1][:, n_l[0]])
 
+    def run_train_double(self, pos, neg, neg2, mask):
+        p_l = list(range(len(pos)))
+        n_l = list(range(len(neg)))
+        n2_l = list(range(len(neg2)))
+        shuffle(p_l)
+        shuffle(n_l)
+        shuffle(n2_l)
+        return self.double_loss(pos[p_l[0]], pos[p_l[1]], neg[n_l[0]], neg2[n2_l[0]], mask[0][:, p_l[0]], mask[0][:, p_l[1]], mask[1][:, n_l[0]], mask[2][:, n2_l[0]])
 
 # class MultiTrippletModel(TrippletModel):
 #     def __init__(self, name, margin=1.0):

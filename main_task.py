@@ -34,7 +34,8 @@ if __name__ == "__main__":
     dev_path = r"D:\reviews\Automotive_5_triplet_dev.json"
 
     parser = ArgumentParser()
-    parser.add_argument("--task", type=str, default='multi_noun_similarity', help='semeval, fewrel, noun_similarity', )
+    # parser.add_argument("--task", type=str, default='multi_noun_similarity', help='semeval, fewrel, noun_similarity', )
+    parser.add_argument("--task", type=str, default='double_negative_similarity', help='semeval, fewrel, noun_similarity', )
     parser.add_argument("--train_data", type=str,
                         default=train_path, \
                         help="training data .txt file path")

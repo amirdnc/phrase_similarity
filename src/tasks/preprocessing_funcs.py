@@ -62,10 +62,16 @@ def get_noun_df(text):
     return pd.DataFrame(data={'pos0': pos0, 'pos1': pos1, 'neg': neg})
 
 def get_multi_noun_df(text):
+    text = text[:10000]  # for debuging
     random.shuffle(text)
     pos = [x['pos'] for x in text]
     neg = [x['neg'] for x in text]
-    return pd.DataFrame(data={'pos': pos, 'neg': neg})
+    if 'neg2' not in text[0]:  #support old format
+        return pd.DataFrame(data={'pos': pos, 'neg': neg})
+    neg2 = [x['neg2'] for x in text]
+    return pd.DataFrame(data={'pos': pos, 'neg': neg, 'neg2': neg2})
+
+
 
 def preprocess_noun(args):
     data_path = args.train_data  # './data/SemEval2010_task8_all_data/SemEval2010_task8_training/TRAIN_FILE.TXT'
@@ -86,7 +92,7 @@ def preprocess_multi_noun(args):
     with open(args.test_data, 'r', encoding='utf8') as f:
         text_test = json.load(f)
     # text_train = text_train[40000: 100000]
-    # text_test = text_test[: 1000]
+    text_test = text_test[: 1000]
     return get_multi_noun_df(text_train), get_multi_noun_df(text_test)
     # return get_multi_noun_df(text_train[:1000]), get_multi_noun_df(text_test[:300])
 
@@ -200,7 +206,8 @@ class Pad_Sequence_Noun():
         return vecs
     def __call__(self, batch):
         # masks = self.pad_seq(batch, 2)
-        return self.pad_seq(batch, 0), self.pad_seq(batch, 1), self.pad_seq(batch, 2)
+        return [self.pad_seq(batch, x) for x in range(len(batch[0]))]
+        # return self.pad_seq(batch, 0), self.pad_seq(batch, 1), self.pad_seq(batch, 2)
 
 def get_e1e2_start(x, e1_id, e2_id):
     try:
@@ -231,20 +238,27 @@ class multi_noun_dataset(Dataset):
         self.df['neg_tokens'] = self.df.progress_apply(lambda x: [tokenizer.encode(y.replace('[mask]', '[MASK]'))for y in x['neg']], axis=1)
         p = self.df.progress_apply(lambda x: [get_mask_index(y, mask_id) for y in x['pos_tokens']], axis=1)
         n = self.df.progress_apply(lambda x: [get_mask_index(y, mask_id) for y in x['neg_tokens']], axis=1)
-        self.df['mask_index'] = [x for x in zip(p, n)]
 
+        if 'neg2' in df:
+            self.df['neg_tokens2'] = self.df.progress_apply(
+                lambda x: [tokenizer.encode(y.replace('[mask]', '[MASK]')) for y in x['neg2']], axis=1)
+            n2 = self.df.progress_apply(lambda x: [get_mask_index(y, mask_id) for y in x['neg_tokens2']], axis=1)
+            self.df['mask_index'] = [x for x in zip(p, n, n2)]
+        else:
+            self.df['mask_index'] = [x for x in zip(p, n)]
     def __len__(self, ):
         return len(self.df)
 
     def __getitem__(self, idx):
-        return [(x) for x in self.df.iloc[idx]['pos_tokens']], \
-               [(x) for x in self.df.iloc[idx]['neg_tokens']], \
-               [(x) for x in self.df.iloc[idx]['mask_index']],
-
-
-        return torch.LongTensor(self.df.iloc[idx]['pos_tokens']), \
-               torch.LongTensor(self.df.iloc[idx]['neg_tokens']), \
-               torch.LongTensor(self.df.iloc[idx]['mask_index'])
+        if 'neg2' in self.df:
+            return [(x) for x in self.df.iloc[idx]['pos_tokens']], \
+                   [(x) for x in self.df.iloc[idx]['neg_tokens']], \
+                   [(x) for x in self.df.iloc[idx]['neg_tokens2']], \
+                   [(x) for x in self.df.iloc[idx]['mask_index']],
+        else:
+            return [(x) for x in self.df.iloc[idx]['pos_tokens']], \
+                   [(x) for x in self.df.iloc[idx]['neg_tokens']], \
+                   [(x) for x in self.df.iloc[idx]['mask_index']],
 
 
 class noun_dataset(Dataset):
@@ -455,7 +469,7 @@ def load_dataloaders(args, test_only=False):
                                   num_workers=0, collate_fn=PS, pin_memory=False)
         test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True, \
                                  num_workers=0, collate_fn=PS, pin_memory=False)
-    elif args.task == 'multi_noun_similarity':
+    elif args.task == 'multi_noun_similarity' or args.task == 'double_negative_similarity':
         train_path = r'data/train.csv'
 
         test_path = r'data/test.csv'
@@ -478,15 +492,16 @@ def load_dataloaders(args, test_only=False):
         if not test_only:
             train_set = multi_noun_dataset(df_train, tokenizer=tokenizer)
             train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, \
-                              num_workers=0, collate_fn=PS, pin_memory=False)
+                                      num_workers=0, collate_fn=PS, pin_memory=False)
         else:
             train_loader = None
+        # if args.task == 'double_negative_similarity':
         test_set = multi_noun_dataset(df_test, tokenizer=tokenizer)
+        test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True, \
+                                 num_workers=0, collate_fn=PS, pin_memory=False)
         train_length = len(test_set)
 
         test_length = len(test_set)
-        test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True, \
-                                 num_workers=0, collate_fn=PS, pin_memory=False)
     elif args.task == 'fewrel':
         df_train, df_test = preprocess_fewrel(args, do_lower_case=lower_case)
         train_loader = fewrel_dataset(df_train, tokenizer=tokenizer, seq_pad_value=tokenizer.pad_token_id,

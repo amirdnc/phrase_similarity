@@ -156,7 +156,8 @@ def train_and_fit(args):
         net.train(); total_loss = 0.0; losses_per_batch = []; accuracy_per_batch = []
         for i, data in enumerate(train_loader, 0):
             # p0, p1, n, masks = data
-            p, n, masks = data
+            # p, n, masks = data
+            p, n, n2, masks = data
             if eval_max(p, 512) or eval_max(n, 512):
                 continue
             # if len(masks) != 3
@@ -164,12 +165,15 @@ def train_and_fit(args):
             # print(f't_results: {t_results}')
             if cuda:
                 p = [x.cuda() for x in p]; n= [x.cuda() for x in n]
+                n2 = [x.cuda() for x in n2]
 
-            if args.model_no == 3:
                 # loss = net.run_train_multi(p, n, masks)
                 # print('p: {}, n:{}, mask:{}'.format([x.size() for x in p], [x.size() for x in n] , [x.size() for x in masks]))
-                if any(x.size()[-1] > 512 for x in n) or any(x.size()[-1] > 512 for x in p): #skip long sentences
-                    continue
+            if any(x.size()[-1] > 512 for x in n) or any(x.size()[-1] > 512 for x in p): #skip long sentences
+                continue
+            if args.task == 'double_negative_similarity':
+                loss = net.run_train_double(p, n, n2, masks)
+            else:
                 loss = net.run_train_multi_reduce(p, n, masks)
 
             loss.backward()
