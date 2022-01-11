@@ -9,11 +9,13 @@ import os
 import re
 import random
 import copy
+import time
 
 import pandas
 import pandas as pd
 import json
 import torch
+from dask import compute
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from transformers import AutoTokenizer
@@ -21,7 +23,8 @@ from transformers import AutoTokenizer
 from ..misc import save_as_pickle, load_pickle
 from tqdm import tqdm
 import logging
-
+import dask.dataframe as dd
+from dask.multiprocessing import get
 tqdm.pandas(desc="prog_bar")
 logging.basicConfig(format='%(asctime)s [%(levelname)s]: %(message)s', \
                     datefmt='%m/%d/%Y %I:%M:%S %p', level=logging.INFO)
@@ -62,7 +65,7 @@ def get_noun_df(text):
     return pd.DataFrame(data={'pos0': pos0, 'pos1': pos1, 'neg': neg})
 
 def get_multi_noun_df(text):
-    text = text[:10000]  # for debuging
+    # text = text[:4023]  # for debuging
     random.shuffle(text)
     pos = [x['pos'] for x in text]
     neg = [x['neg'] for x in text]
@@ -92,7 +95,7 @@ def preprocess_multi_noun(args):
     with open(args.test_data, 'r', encoding='utf8') as f:
         text_test = json.load(f)
     # text_train = text_train[40000: 100000]
-    text_test = text_test[: 1000]
+    text_test = text_test[: 5000]
     return get_multi_noun_df(text_train), get_multi_noun_df(text_test)
     # return get_multi_noun_df(text_train[:1000]), get_multi_noun_df(text_test[:300])
 
@@ -230,18 +233,26 @@ def get_mask_index(x, mask_id):
         print(e)
     return mask_index
 
+def tokenize_df(tokenizer, df, sent_type):
+    return df.progress_apply(lambda x: [tokenizer.encode(y.replace('[mask]', '[MASK]'))for y in x[sent_type]], axis=1)
+    # ddata = dd.from_pandas(df, npartitions=30)
+    # return ddata.map_partitions(
+    #     lambda x: [tokenizer.encode(y.replace('[mask]', '[MASK]')) for y in x[sent_type]]).compute(scheduler='threads')
+
+
 class multi_noun_dataset(Dataset):
     def __init__(self, df, tokenizer):
         mask_id = tokenizer.convert_tokens_to_ids('[MASK]')
         self.df = df
-        self.df['pos_tokens'] = self.df.progress_apply(lambda x: [tokenizer.encode(y.replace('[mask]', '[MASK]'))for y in x['pos']], axis=1)
-        self.df['neg_tokens'] = self.df.progress_apply(lambda x: [tokenizer.encode(y.replace('[mask]', '[MASK]'))for y in x['neg']], axis=1)
+        self.df['pos_tokens'] = tokenize_df(tokenizer, df, 'pos')
+        self.df['neg_tokens'] = tokenize_df(tokenizer, df, 'neg')
+        print('start tokenize')
+        t = time.time()
         p = self.df.progress_apply(lambda x: [get_mask_index(y, mask_id) for y in x['pos_tokens']], axis=1)
         n = self.df.progress_apply(lambda x: [get_mask_index(y, mask_id) for y in x['neg_tokens']], axis=1)
-
+        print('finish tokenizing. took: {}'.format(time.time() - t))
         if 'neg2' in df:
-            self.df['neg_tokens2'] = self.df.progress_apply(
-                lambda x: [tokenizer.encode(y.replace('[mask]', '[MASK]')) for y in x['neg2']], axis=1)
+            self.df['neg_tokens2'] = tokenize_df(tokenizer, df, 'neg2')
             n2 = self.df.progress_apply(lambda x: [get_mask_index(y, mask_id) for y in x['neg_tokens2']], axis=1)
             self.df['mask_index'] = [x for x in zip(p, n, n2)]
         else:
@@ -455,7 +466,7 @@ def load_dataloaders(args, test_only=False):
 
         tokenizer = AutoTokenizer.from_pretrained(args.model)
 
-        save_as_pickle("%s_tokenizer.pkl" % model_name.replace('/', '_'), tokenizer)
+        save_as_pickle("%s_tokenizer.pkl" % model_name.replace('/', '_'), tokenizer, args.save_path)
         logger.info("Saved %s tokenizer at ./data/%s_tokenizer.pkl" %(model_name, model_name))
 
     if args.task == 'noun_similarity':
@@ -473,14 +484,6 @@ def load_dataloaders(args, test_only=False):
         train_path = r'data/train.csv'
 
         test_path = r'data/test.csv'
-        # if os.path.isfile(train_path):
-        #     df_train = pd.read_csv(train_path)
-        # else:
-        #     with open(train_path, 'w') as f:
-        #         df_train, df_test = preprocess_multi_noun(args)
-        #
-        #         json.dump(train_set, f)
-
         if os.path.isfile(test_path) and os.path.isfile(train_path) and False:
             df_test = pandas.read_csv(test_path)
             df_train = pandas.read_csv(train_path)
@@ -491,7 +494,8 @@ def load_dataloaders(args, test_only=False):
         PS = Pad_Sequence_Noun(seq_pad_value=tokenizer.pad_token_id)
         if not test_only:
             train_set = multi_noun_dataset(df_train, tokenizer=tokenizer)
-            train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, \
+            print('batch size is {} * {} = {}'.format(torch.cuda.device_count(), args.batch_size, torch.cuda.device_count()* args.batch_size ))
+            train_loader = DataLoader(train_set, batch_size=args.batch_size * torch.cuda.device_count(), shuffle=True, \
                                       num_workers=0, collate_fn=PS, pin_memory=False)
         else:
             train_loader = None
@@ -499,14 +503,8 @@ def load_dataloaders(args, test_only=False):
         test_set = multi_noun_dataset(df_test, tokenizer=tokenizer)
         test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True, \
                                  num_workers=0, collate_fn=PS, pin_memory=False)
-        train_length = len(test_set)
+        train_length = len(train_set)
 
         test_length = len(test_set)
-    elif args.task == 'fewrel':
-        df_train, df_test = preprocess_fewrel(args, do_lower_case=lower_case)
-        train_loader = fewrel_dataset(df_train, tokenizer=tokenizer, seq_pad_value=tokenizer.pad_token_id,
-                                      e1_id=e1_id, e2_id=e2_id)
-        train_length = len(train_loader)
-        test_loader, test_length = None, None
 
     return train_loader, test_loader, train_length, test_length

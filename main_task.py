@@ -5,6 +5,7 @@ Created on Mon Dec  2 17:40:16 2019
 
 @author: weetee
 """
+import platform
 import random
 
 import torch
@@ -28,11 +29,14 @@ random.seed(seed_val)
 torch.manual_seed(seed_val)
 torch.cuda.manual_seed_all(seed_val)
 if __name__ == "__main__":
-    train_path = r"D:\reviews\Arts_Crafts_and_Sewing_5_triplet_train.json"
-    dev_path = r"D:\reviews\Arts_Crafts_and_Sewing_5_triplet_dev.json"
-    train_path = r"D:\reviews\Automotive_5_triplet_train.json"
-    dev_path = r"D:\reviews\Automotive_5_triplet_dev.json"
-
+    if 'Windows' in platform.platform():
+        train_path = r"D:\reviews\Arts_Crafts_and_Sewing_5_triplet_train.json"
+        dev_path = r"D:\reviews\Arts_Crafts_and_Sewing_5_triplet_dev.json"
+        train_path = r"D:\reviews\Automotive_5_triplet_train.json"
+        dev_path = r"D:\reviews\Automotive_5_triplet_dev.json"
+    else:
+        train_path = r"../../data/reviews/Automotive_5_triplet_train.json"
+        dev_path = r"../../data/reviews/Automotive_5_triplet_dev.json"
     parser = ArgumentParser()
     # parser.add_argument("--task", type=str, default='multi_noun_similarity', help='semeval, fewrel, noun_similarity', )
     parser.add_argument("--task", type=str, default='double_negative_similarity', help='semeval, fewrel, noun_similarity', )
@@ -69,6 +73,7 @@ if __name__ == "__main__":
     parser.add_argument("--infer", type=int, default=0, help="0: Don't infer, 1: Infer")
     parser.add_argument("--val_step", type=int, default=10, help="validation step")
     parser.add_argument('--model', type=str, default='SpanBERT/spanbert-base-cased', help='model string to use')
+    parser.add_argument('--save_path', type=str, default='./data_triple/', help='path to save models and tokenizer')
     
     args = parser.parse_args()
     

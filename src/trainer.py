@@ -102,7 +102,7 @@ def train_and_fit(args):
         scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[2,4,6,8,12,15,18,20,22,\
                                                                           24,26,30], gamma=0.8)
     
-    losses_per_epoch, accuracy_per_epoch = load_results(args.model_no)
+    losses_per_epoch, accuracy_per_epoch = load_results(args)
     
     logger.info("Starting training process...")
     pad_id = tokenizer.pad_token_id

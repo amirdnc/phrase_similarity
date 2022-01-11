@@ -65,6 +65,9 @@ def eval_sebert(test_loader, model=None, limit=10):
         net = AutoModel.from_pretrained("sentence-transformers/bert-base-nli-mean-tokens").cuda()
     else:
         net = model
+    if isinstance(net, torch.nn.DataParallel):
+        net = net.module
+
     logger.info("Evaluating test samples...")
     tot_loss = 0; tot = 0; good = 0
     net.eval()
@@ -77,8 +80,8 @@ def eval_sebert(test_loader, model=None, limit=10):
             n = [x.cuda() for x in n]
             # ps = [run_sbert(net, x) for x in p]
             # ns = [run_sbert(net, x) for x in n]
-            ps = [net(x, masks[0][:,j]).detach() for (j,x) in enumerate(p[:limit*2])]
-            ns = [net(x, masks[1][:,j]).detach() for (j,x) in enumerate(n[:limit])]
+            ps = [net.forward_aux(x, masks[0][:,j]).detach() for (j,x) in enumerate(p[:limit*2])]
+            ns = [net.forward_aux(x, masks[1][:,j]).detach() for (j,x) in enumerate(n[:limit])]
             p1 = ps[:int(len(ps)/2)]
             p0 = ps[int(len(ps)/2):]
 
@@ -90,7 +93,10 @@ def eval_sebert(test_loader, model=None, limit=10):
             good += calc_all(p0, p1, ns)
             tot += p0[0].size(0)
             # tot += len(goods)
-            tot_loss += net.run_train_multi(p, n, masks)
+            cur_loss = net.run_train_multi(p, n, masks)
+            if torch.cuda.device_count() > 1:
+                cur_loss = cur_loss.sum()
+            tot_loss += cur_loss
     accuracy = good / tot
     loss = tot_loss/(i + 1)
     results = {

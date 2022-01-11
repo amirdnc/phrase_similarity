@@ -16,8 +16,8 @@ def load_pickle(filename):
         data = pickle.load(pkl_file)
     return data
 
-def save_as_pickle(filename, data):
-    completeName = os.path.join("./data/",\
+def save_as_pickle(filename, data, base_dir="./data/"):
+    completeName = os.path.join(base_dir,\
                                 filename)
     with open(completeName, 'wb') as output:
         pickle.dump(data, output)

@@ -21,6 +21,7 @@ def get_addtional_data(t):
             'token_type_ids': torch.zeros_like(t).cuda()}
 
 
+
 class TrippletModel(nn.Module):
     def __init__(self, name, margin=1):
         super(TrippletModel, self).__init__()
@@ -28,11 +29,12 @@ class TrippletModel(nn.Module):
         # self.model = AutoModel.from_config(config)
         self.model = AutoModelForMaskedLM.from_pretrained(name)
         self.loss = nn.TripletMarginLoss(margin=margin, p=2)
-        # self.hard_loss = nn.TripletMarginLoss(margin=margin*2, p=2)
+        self.hard_loss = nn.TripletMarginLoss(margin=margin*1.5, p=2)
+        self.easy_loss = nn.TripletMarginLoss(margin=margin*0.75, p=2)
         self.margin = margin
         self.drop = nn.Dropout(p=0.5)
 
-    def forward(self, input, index):
+    def forward_aux(self, input, index):
         prediction_scores = self.model(**get_addtional_data(input))[0]
         droped_scores = self.drop(prediction_scores)
         return droped_scores[torch.arange(droped_scores.size(0)), index]
@@ -50,28 +52,28 @@ class TrippletModel(nn.Module):
         # return v1v2
 
     def run_train(self, pos0, pos1, neg, pos0_i, pos1_i, neg_i, get_embedding=False):
-        p0 = self.forward(pos0, pos0_i)
-        p1 = self.forward(pos1, pos1_i)
-        n = self.forward(neg, neg_i)
+        p0 = self.forward_aux(pos0, pos0_i)
+        p1 = self.forward_aux(pos1, pos1_i)
+        n = self.forward_aux(neg, neg_i)
         if get_embedding:
             return self.loss(p0, p1, n), p0, p1, n
         else:
             return self.loss(p0, p1, n)
 
     def double_loss(self, pos0, pos1, neg, neg2, pos0_i, pos1_i, neg_i, neg2_i, get_embedding=False):
-        p0 = self.forward(pos0, pos0_i)
-        p1 = self.forward(pos1, pos1_i)
-        n = self.forward(neg, neg_i)
-        n2 = self.forward(neg2, neg2_i)
+        p0 = self.forward_aux(pos0, pos0_i)
+        p1 = self.forward_aux(pos1, pos1_i)
+        n = self.forward_aux(neg, neg_i)
+        n2 = self.forward_aux(neg2, neg2_i)
         if get_embedding:
             return self.loss(p0, p1, n), p0, p1, n
         else:
-            return self.loss(p0, p1, n) + self.loss(p0, n, n2)
+            return self.loss(p0, p1, n) + self.loss(p0, n, n2) + self.hard_loss(p0, p1, n2)
 
     def run_train_multi(self, pos, neg, mask):
-        ps = [self.forward(x, mask[0][:, j]) for (j, x) in enumerate(pos)]
+        ps = [self.forward_aux(x, mask[0][:, j]) for (j, x) in enumerate(pos)]
         shuffle(ps)
-        ns = [self.forward(x, mask[1][:, j]) for (j, x) in enumerate(neg)]
+        ns = [self.forward_aux(x, mask[1][:, j]) for (j, x) in enumerate(neg)]
         pos_dist = dist_mat(ps, ps)
         neg_dist = dist_mat(ps, ns + ns)
         # neg_expns = torch.cat([neg_dist, neg_dist], dim=1)
@@ -88,6 +90,9 @@ class TrippletModel(nn.Module):
         shuffle(p_l)
         shuffle(n_l)
         return self.run_train(pos[p_l[0]], pos[p_l[1]], neg[n_l[0]], mask[0][:, p_l[0]], mask[0][:, p_l[1]], mask[1][:, n_l[0]])
+
+    def forward(self, pos, neg, neg2, mask):
+        return self.run_train_double(pos, neg, neg2, mask)
 
     def run_train_double(self, pos, neg, neg2, mask):
         p_l = list(range(len(pos)))
