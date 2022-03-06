@@ -2,7 +2,7 @@ from random import shuffle
 
 import torch
 from torch import nn
-from transformers import AutoModel, AutoConfig, AutoModelForMaskedLM
+from transformers import AutoModelForMaskedLM
 
 
 def norm_to_unit(v):
@@ -64,11 +64,11 @@ class TrippletModel(nn.Module):
         p0 = self.forward_aux(pos0, pos0_i)
         p1 = self.forward_aux(pos1, pos1_i)
         n = self.forward_aux(neg, neg_i)
-        n2 = self.forward_aux(neg2, neg2_i)
+        # n2 = self.forward_aux(neg2, neg2_i)
         if get_embedding:
             return self.loss(p0, p1, n), p0, p1, n
         else:
-            return self.loss(p0, p1, n) + self.loss(p0, n, n2) + self.hard_loss(p0, p1, n2)
+            return self.loss(p0, p1, n) # + self.easy_loss(p0, n, n2) + self.hard_loss(p0, p1, n2)
 
     def run_train_multi(self, pos, neg, mask):
         ps = [self.forward_aux(x, mask[0][:, j]) for (j, x) in enumerate(pos)]
@@ -91,8 +91,11 @@ class TrippletModel(nn.Module):
         shuffle(n_l)
         return self.run_train(pos[p_l[0]], pos[p_l[1]], neg[n_l[0]], mask[0][:, p_l[0]], mask[0][:, p_l[1]], mask[1][:, n_l[0]])
 
-    def forward(self, pos, neg, neg2, mask):
-        return self.run_train_double(pos, neg, neg2, mask)
+    # def forward(self, pos, neg, neg2, mask):
+    #     return self.run_train_double(pos, neg, neg2, mask)
+
+    def forward(self, pos, neg, mask):
+        return self.run_train_multi_reduce(pos, neg, mask)
 
     def run_train_double(self, pos, neg, neg2, mask):
         p_l = list(range(len(pos)))
@@ -103,6 +106,23 @@ class TrippletModel(nn.Module):
         shuffle(n2_l)
         return self.double_loss(pos[p_l[0]], pos[p_l[1]], neg[n_l[0]], neg2[n2_l[0]], mask[0][:, p_l[0]], mask[0][:, p_l[1]], mask[1][:, n_l[0]], mask[2][:, n2_l[0]])
 
+
+def to_index_list(index, droped_scores):
+    res = []
+    for sent in [torch.stack([torch.tensor((i, j)) for j in  range(cur[0],  cur[0] + cur[1])]) for i, cur in enumerate(index)]: # enumerate indexes per sentence
+        res.append(droped_scores[sent[:,0], sent[:,1]])
+    return res
+
+class TrippletSpanModel(TrippletModel):
+    def __init__(self, name, margin=1):
+        super(TrippletSpanModel, self).__init__(name, margin)
+
+    def forward_aux(self, input, index):
+        prediction_scores = self.model(**get_addtional_data(input))[0]
+        droped_scores = self.drop(prediction_scores)
+        res = to_index_list(index, droped_scores)
+        return torch.stack([x.mean(dim=0) for x in res])
+        # return droped_scores[torch.arange(droped_scores.size(0)), index]
 # class MultiTrippletModel(TrippletModel):
 #     def __init__(self, name, margin=1.0):
 #         super(MultiTrippletModel, self, name, margin).__init__()

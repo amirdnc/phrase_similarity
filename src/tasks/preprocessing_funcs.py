@@ -67,12 +67,13 @@ def get_noun_df(text):
 def get_multi_noun_df(text):
     # text = text[:4023]  # for debuging
     random.shuffle(text)
+    return pd.DataFrame.from_records(text)  # .transpose()
     pos = [x['pos'] for x in text]
     neg = [x['neg'] for x in text]
     if 'neg2' not in text[0]:  #support old format
         return pd.DataFrame(data={'pos': pos, 'neg': neg})
     neg2 = [x['neg2'] for x in text]
-    return pd.DataFrame(data={'pos': pos, 'neg': neg, 'neg2': neg2})
+    # return pd.DataFrame(data={'pos': pos, 'neg': neg, 'neg2': neg2})
 
 
 
@@ -233,15 +234,44 @@ def get_mask_index(x, mask_id):
         print(e)
     return mask_index
 
+def tokenize_with_span(tokenizer, l, phrase, mask_id, infrence=False):
+    phrase = tokenizer.encode(phrase)[1:-1]
+    sents = []
+    ii = []
+    for index, s in enumerate(l):
+        sent = tokenizer.encode(s)
+        i = sent.index(mask_id)
+        if index <= (len(l)/3 - 1) or infrence:
+            sent = sent[:i] + phrase + sent[i+1:]
+            length = (len(phrase))
+        else:
+            length = 1
+        sents.append(sent)
+        ii.append((i, length))
+    return  (ii, sents)
+
 def tokenize_df(tokenizer, df, sent_type):
     return df.progress_apply(lambda x: [tokenizer.encode(y.replace('[mask]', '[MASK]'))for y in x[sent_type]], axis=1)
     # ddata = dd.from_pandas(df, npartitions=30)
     # return ddata.map_partitions(
     #     lambda x: [tokenizer.encode(y.replace('[mask]', '[MASK]')) for y in x[sent_type]]).compute(scheduler='threads')
 
+def tokenize_span(tokenizer, df, sent_type):
+    if sent_type == 'neg2': #it's late, this works...
+        new_df = df.progress_apply(lambda x: tokenize_with_span(tokenizer, x[sent_type], x['neg_phrase2'],
+                                                                tokenizer.convert_tokens_to_ids('[MASK]')), axis=1)
+    else:
+        new_df = df.progress_apply(lambda x: tokenize_with_span(tokenizer, x[sent_type], x[sent_type + '_phrase'],
+                                                          tokenizer.convert_tokens_to_ids('[MASK]')), axis=1)
+    new_df = pd.DataFrame(new_df.to_list())
+    new_df.rename(columns={0: 'mask_index', 1: 'tokens'}, inplace=True)
+    return new_df
 
 class multi_noun_dataset(Dataset):
-    def __init__(self, df, tokenizer):
+    def __init__(self, df, tokenizer=None):
+        if not tokenizer:
+            self.df = df
+            return
         mask_id = tokenizer.convert_tokens_to_ids('[MASK]')
         self.df = df
         self.df['pos_tokens'] = tokenize_df(tokenizer, df, 'pos')
@@ -272,6 +302,44 @@ class multi_noun_dataset(Dataset):
                    [(x) for x in self.df.iloc[idx]['mask_index']],
 
 
+class span_dataset(Dataset):
+
+    def __init__(self, df, tokenizer=None):
+        if not tokenizer:
+            self.df = df
+            return
+        mask_id = tokenizer.convert_tokens_to_ids('[MASK]')
+        self.df = df
+        tp = tokenize_span(tokenizer, df, 'pos')
+        p = tp['mask_index']
+        self.df['pos_tokens'] = tp['tokens']
+
+        tn = tokenize_span(tokenizer, df, 'neg')
+        n = tn['mask_index']
+        self.df['neg_tokens'] = tn['tokens']
+
+        tn2 = tokenize_span(tokenizer, df, 'neg2')
+        n2 = tn2['mask_index']
+        self.df['neg_tokens2'] = tn2['tokens']
+        self.df['mask_index'] = [x for x in zip(p, n, n2)]
+        # print('start tokenize')
+        # t = time.time()
+        # n = self.df.progress_apply(lambda x: [get_mask_index(y, mask_id) for y in x['neg_tokens']], axis=1)
+        # print('finish tokenizing. took: {}'.format(time.time() - t))
+        # if 'neg2' in df:
+        #     self.df['neg_tokens2'] = tokenize_span(tokenizer, df, 'neg2')
+        #     n2 = self.df.progress_apply(lambda x: [get_mask_index(y, mask_id) for y in x['neg_tokens2']], axis=1)
+        #     self.df['mask_index'] = [x for x in zip(p, n, n2)]
+        # else:
+        #     self.df['mask_index'] = [x for x in zip(p, n)]
+    def __len__(self, ):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        return [(x) for x in self.df.iloc[idx]['pos_tokens']], \
+               [(x) for x in self.df.iloc[idx]['neg_tokens']], \
+               [(x) for x in self.df.iloc[idx]['neg_tokens2']], \
+               [(x) for x in self.df.iloc[idx]['mask_index']],
 class noun_dataset(Dataset):
     def __init__(self, df, tokenizer):
         mask_id = tokenizer.convert_tokens_to_ids('[MASK]')
@@ -469,29 +537,33 @@ def load_dataloaders(args, test_only=False):
         save_as_pickle("%s_tokenizer.pkl" % model_name.replace('/', '_'), tokenizer, args.save_path)
         logger.info("Saved %s tokenizer at ./data/%s_tokenizer.pkl" %(model_name, model_name))
 
+    PS = Pad_Sequence_Noun(seq_pad_value=tokenizer.pad_token_id)
+
+    path_train = '{}_{}.pkl'.format(args.task, os.path.basename(args.train_data))
+    path_test = '{}_{}.pkl'.format(args.task, os.path.basename(args.test_data))
     if args.task == 'noun_similarity':
         df_train, df_test = preprocess_noun(args)
         train_set = noun_dataset(df_train, tokenizer=tokenizer)
         test_set = noun_dataset(df_test, tokenizer=tokenizer)
-        train_length = len(train_set)
-        test_length = len(test_set)
-        PS = Pad_Sequence_Noun(seq_pad_value=tokenizer.pad_token_id)
         train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, \
                                   num_workers=0, collate_fn=PS, pin_memory=False)
         test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True, \
                                  num_workers=0, collate_fn=PS, pin_memory=False)
-    elif args.task == 'multi_noun_similarity' or args.task == 'double_negative_similarity':
-        train_path = r'data/train.csv'
 
-        test_path = r'data/test.csv'
-        if os.path.isfile(test_path) and os.path.isfile(train_path) and False:
-            df_test = pandas.read_csv(test_path)
-            df_train = pandas.read_csv(train_path)
+    elif args.task == 'multi_noun_similarity':
+
+        if os.path.exists(path_train):
+            test_set = multi_noun_dataset(pandas.read_pickle(path_test))
+            train_set = multi_noun_dataset(pandas.read_pickle(path_train))
+            train_loader = DataLoader(train_set, batch_size=args.batch_size * torch.cuda.device_count(), shuffle=True, \
+                                      num_workers=0, collate_fn=PS, pin_memory=False)
+            test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True, \
+                                     num_workers=0, collate_fn=PS, pin_memory=False)
+            return train_loader, test_loader, len(train_loader), len(test_loader)
         else:
             df_train, df_test = preprocess_multi_noun(args)
             # df_test.to_csv(test_path)
             # df_test.to_csv(train_path)
-        PS = Pad_Sequence_Noun(seq_pad_value=tokenizer.pad_token_id)
         if not test_only:
             train_set = multi_noun_dataset(df_train, tokenizer=tokenizer)
             print('batch size is {} * {} = {}'.format(torch.cuda.device_count(), args.batch_size, torch.cuda.device_count()* args.batch_size ))
@@ -503,8 +575,41 @@ def load_dataloaders(args, test_only=False):
         test_set = multi_noun_dataset(df_test, tokenizer=tokenizer)
         test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True, \
                                  num_workers=0, collate_fn=PS, pin_memory=False)
-        train_length = len(train_set)
+        if not os.path.exists(path_train):
+            with open(path_train, 'wb') as f:
+                train_set.df.to_pickle(f)
 
-        test_length = len(test_set)
+            with open(path_test, 'wb') as f:
+                test_set.df.to_pickle(f)
+    elif args.task == 'double_negative_similarity':
+
+        if os.path.exists(path_train):
+            test_set = span_dataset(pandas.read_pickle(path_test))
+            train_set = span_dataset(pandas.read_pickle(path_train))
+            train_loader = DataLoader(train_set, batch_size=args.batch_size * torch.cuda.device_count(), shuffle=True, \
+                                      num_workers=0, collate_fn=PS, pin_memory=False)
+            test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True, \
+                                     num_workers=0, collate_fn=PS, pin_memory=False)
+            return train_loader, test_loader, len(train_loader), len(test_loader)
+        if not test_only:
+
+            df_train, df_test = preprocess_multi_noun(args)
+            train_set = span_dataset(df_train, tokenizer=tokenizer)
+            print('batch size is {} * {} = {}'.format(torch.cuda.device_count(), args.batch_size,
+                                                      torch.cuda.device_count() * args.batch_size))
+            train_loader = DataLoader(train_set, batch_size=args.batch_size * torch.cuda.device_count(), shuffle=True, \
+                                      num_workers=0, collate_fn=PS, pin_memory=False)
+            with open(path_train,'wb') as f:
+                train_set.df.to_pickle(f)
+        else:
+            train_loader = None
+        test_set = span_dataset(df_test, tokenizer=tokenizer)
+        test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True, \
+                                 num_workers=0, collate_fn=PS, pin_memory=False)
+        with open(path_test,'wb') as f:
+            test_set.df.to_pickle(path_test)
+    train_length = len(train_set)
+
+    test_length = len(test_set)
 
     return train_loader, test_loader, train_length, test_length

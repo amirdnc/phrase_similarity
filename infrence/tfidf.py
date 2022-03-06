@@ -7,7 +7,7 @@ from nltk import sent_tokenize
 from spacy.lang.en import English
 from tqdm import tqdm
 
-from utils import get_data_with_index, get_raw_data
+from infrence.utils import get_data_with_index, get_raw_data
 
 nlp = English()
 # Create a blank Tokenizer with just the English vocab

@@ -6,6 +6,8 @@ Created on Fri Nov 29 09:53:55 2019
 @author: weetee
 """
 import os
+import platform
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -13,7 +15,8 @@ from torch.nn.utils import clip_grad_norm_
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModel
 
-from src.triplet import TrippletModel
+from infrence.phrase_similarity import eval_model
+from src.triplet import TrippletModel, TrippletSpanModel
 from testing import eval_sebert
 from .preprocessing_funcs import load_dataloaders
 from .train_funcs import load_state, load_results, evaluate_, evaluate_results, l2
@@ -77,8 +80,10 @@ def train_and_fit(args):
                                           task='classification' if args.task != 'fewrel' else 'fewrel',\
                                           n_classes_=args.num_classes)
     elif args.model_no == 3:
-        net = TrippletModel(args.model)
-
+        if args.task == 'multi_noun_similarity':
+            net = TrippletModel(args.model)
+        else:
+            net = TrippletSpanModel(args.model)
     if args.model_no == 3:
         tokenizer = AutoTokenizer.from_pretrained(args.model)
     else:
@@ -107,7 +112,9 @@ def train_and_fit(args):
     elif args.model_no == 3:
         unfrozen_layers = ["classifier", "pooler", "encoder.layer.11", \
                            "classification_layer", "blanks_linear", "lm_linear", "cls", 'encoder.layer.10', 'encoder.layer.9"']
-        
+
+    gold_eval = args.test_path
+    raw_eval = args.test_raw
     for name, param in net.named_parameters():
         if not any([layer in name for layer in unfrozen_layers]):
             print("[FROZE]: %s" % name)
@@ -148,7 +155,9 @@ def train_and_fit(args):
     losses_per_epoch, accuracy_per_epoch, test_f1_per_epoch = load_results(args.model_no)
 
     logger.info("Starting training process...")
-    update_size = max(len(train_loader)//20, args.val_step)
+    logger.info("train len is {}".format(train_len))
+    num_steps = train_len/ (torch.cuda.device_count())
+    update_size = int(max(num_steps//3, args.val_step))
     logger.info("update step is {}".format(update_size))
     # eval_sebert(test_loader, net)
     net.eval()
@@ -160,21 +169,28 @@ def train_and_fit(args):
         start_time = time.time()
         net.train(); total_loss = 0.0; losses_per_batch = []; accuracy_per_batch = []
         i = 0
-        for data in tqdm(train_loader, total=train_len/ (torch.cuda.device_count() * args.batch_size)):
+        for data in tqdm(train_loader, total=num_steps):
             i += 1
-            p, n, n2, masks = data
+            if args.task == 'double_negative_similarity':
+                p, n, n2, masks = data
+            else:
+                p, n, masks = data
             if eval_max(p, 512) or eval_max(n, 512):
                 continue
             if cuda:
                 p = [x.cuda() for x in p]; n= [x.cuda() for x in n]
-                n2 = [x.cuda() for x in n2]
+                if args.task == 'double_negative_similarity':
+                    n2 = [x.cuda() for x in n2]
 
-            if any(x.size()[-1] > 512 for x in n) or any(x.size()[-1] > 512 for x in p) or any(x.size()[-1] > 512 for x in n2): #skip long sentences
+            if any(x.size()[-1] > 512 for x in n) or any(x.size()[-1] > 512 for x in p): #skip long sentences
                 continue
             if args.task == 'double_negative_similarity':
+                if any(x.size()[-1] > 512 for x in n2):
+                    continue
                 loss = net(p, n, n2, masks)
             else:
-                loss = net.run_train_multi_reduce(p, n, masks)
+                # loss = net.run_train_multi_reduce(p, n, masks)
+                loss = net(p, n, masks)
             if torch.cuda.device_count() > 1:
                 loss = loss.sum()
             loss.backward()
@@ -187,9 +203,9 @@ def train_and_fit(args):
             total_loss += loss.item()
             # total_acc += evaluate_(classification_logits, labels, \
             #                        ignore_idx=-1)[0]
-            
+
+            losses_per_batch.append(args.gradient_acc_steps * total_loss / update_size)
             if (i % update_size) == (update_size - 1):
-                losses_per_batch.append(args.gradient_acc_steps*total_loss/update_size)
                 # accuracy_per_batch.append(total_acc/update_size)
                 print('[Epoch: %d, %5d/ %d points] total loss, %.3f' %
                       (epoch + 1, (i + 1)*args.batch_size * torch.cuda.device_count(), train_len, losses_per_batch[-1]))
@@ -197,11 +213,18 @@ def train_and_fit(args):
             # if i+1 % args.val_step == 0:
                 print('val step eval. Step {}'.format(i))
                 # results = evaluate_results(net, test_loader, cuda)
-                results = eval_sebert(test_loader, net)
+                # results = eval_sebert(test_loader, net)
+                net.eval()
+                if hasattr(net, 'module'):
+                    results = eval_model(gold_eval, raw_eval, net.module)
+                else:
+                    results = eval_model(gold_eval, raw_eval, net)
+                net.train()
+
                 losses_per_epoch.append(sum(losses_per_batch) / len(losses_per_batch))
                 print("Epoch finished, took %.2f seconds." % (time.time() - start_time))
                 print("Losses at Epoch %d: %.7f" % (epoch + 1, losses_per_epoch[-1]))
-
+                print('cur score: {}'.format(1-results['loss']))
                 if results['loss'] < best_pred:
                     print("new best loss: {}!".format(results['loss']))
                     best_pred = results['loss']
@@ -217,7 +240,8 @@ def train_and_fit(args):
         scheduler.step()
         # results = evaluate_results(net, test_loader, cuda)
         results = eval_sebert(test_loader, net)
-        losses_per_epoch.append(sum(losses_per_batch)/len(losses_per_batch))
+        if losses_per_batch:
+            losses_per_epoch.append(sum(losses_per_batch)/len(losses_per_batch))
         print("Epoch finished, took %.2f seconds." % (time.time() - start_time))
         print("Losses at Epoch %d: %.7f" % (epoch + 1, losses_per_epoch[-1]))
         

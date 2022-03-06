@@ -34,12 +34,28 @@ if __name__ == "__main__":
         dev_path = r"D:\reviews\Arts_Crafts_and_Sewing_5_triplet_dev.json"
         train_path = r"D:\reviews\Automotive_5_triplet_train.json"
         dev_path = r"D:\reviews\Automotive_5_triplet_dev.json"
+        gold_eval = r"D:\human\automotive1500.csv"
+        raw_eval = 'Automotive_5.json.gz'
+
+
+        train_path = r"D:\reviews\Arts_Crafts_and_Sewing_5_triplet_train.json"
+        dev_path = r"D:\reviews\Arts_Crafts_and_Sewing_5_triplet_dev.json"
+        gold_eval = r"D:\human\art1500.csv"
+        raw_eval = 'Arts_Crafts_and_Sewing_5.json.gz'
     else:
         train_path = r"../../data/reviews/Automotive_5_triplet_train.json"
         dev_path = r"../../data/reviews/Automotive_5_triplet_dev.json"
+        gold_eval = r"/home/nlp/amirdnc/data/reviews/automotive1500.csv"
+        raw_eval = 'Automotive_5.json.gz'
+
+
+        train_path = r"../../data/reviews/Arts_Crafts_and_Sewing_5_triplet_train.json"
+        dev_path = r"../../data/reviews/Arts_Crafts_and_Sewing_5_triplet_dev.json"
+        gold_eval = r"/home/nlp/amirdnc/data/reviews/art1500.csv"
+        raw_eval = 'Arts_Crafts_and_Sewing_5.json.gz'
     parser = ArgumentParser()
-    # parser.add_argument("--task", type=str, default='multi_noun_similarity', help='semeval, fewrel, noun_similarity', )
-    parser.add_argument("--task", type=str, default='double_negative_similarity', help='semeval, fewrel, noun_similarity', )
+    parser.add_argument("--task", type=str, default='multi_noun_similarity', help='semeval, fewrel, noun_similarity', )
+    # parser.add_argument("--task", type=str, default='double_negative_similarity', help='semeval, fewrel, noun_similarity', )
     parser.add_argument("--train_data", type=str,
                         default=train_path, \
                         help="training data .txt file path")
@@ -55,7 +71,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--use_pretrained_blanks", type=int, default=0, help="0: Don't use pre-trained blanks model, 1: use pre-trained blanks model")
     parser.add_argument("--num_classes", type=int, default=19, help='number of relation classes')
-    parser.add_argument("--batch_size", type=int, default=20, help="Training batch size")
+    parser.add_argument("--batch_size", type=int, default=8, help="Training batch size")
     parser.add_argument("--gradient_acc_steps", type=int, default=2, help="No. of steps of gradient accumulation")
     parser.add_argument("--max_norm", type=float, default=1.0, help="Clipped gradient norm")
     parser.add_argument("--fp16", type=int, default=0, help="1: use mixed precision ; 0: use floating point 32") # mixed precision doesn't seem to train well
@@ -73,26 +89,27 @@ if __name__ == "__main__":
     parser.add_argument("--infer", type=int, default=0, help="0: Don't infer, 1: Infer")
     parser.add_argument("--val_step", type=int, default=10, help="validation step")
     parser.add_argument('--model', type=str, default='SpanBERT/spanbert-base-cased', help='model string to use')
-    parser.add_argument('--save_path', type=str, default='./data_triple/', help='path to save models and tokenizer')
-    
+    parser.add_argument('--save_path', type=str, default='./data_art_base_once/',
+                        help='path to save models and tokenizer')
+    parser.add_argument('--test_path', type=str, default=gold_eval,
+                        help='path for test')
+    parser.add_argument('--test_raw', type=str, default=raw_eval,
+                        help='path for raw test data')
+
     args = parser.parse_args()
     
-    if (args.train == 1) and (args.task != 'fewrel'):
+    if args.train == 1:
         net = train_and_fit(args)
-        
-    if (args.infer == 1) and (args.task != 'fewrel'):
+
+    if args.infer == 1:
         inferer = infer_from_trained(args, detect_entities=True)
         test = "The surprise [E1]visit[/E1] caused a [E2]frenzy[/E2] on the already chaotic trading floor."
         inferer.infer_sentence(test, detect_entities=False)
         test2 = "After eating the chicken, he developed a sore throat the next morning."
         inferer.infer_sentence(test2, detect_entities=True)
-        
+
         while True:
             sent = input("Type input sentence ('quit' or 'exit' to terminate):\n")
             if sent.lower() in ['quit', 'exit']:
                 break
             inferer.infer_sentence(sent, detect_entities=False)
-    
-    if args.task == 'fewrel':
-        fewrel = FewRel(args)
-        meta_input, e1_e2_start, meta_labels, outputs = fewrel.evaluate()

@@ -74,7 +74,8 @@ def eval_sebert(test_loader, model=None, limit=10):
     with torch.no_grad():
         for i, data in tqdm(enumerate(test_loader), total=len(test_loader)):
 
-            p, n, n2, masks = data #todo fix evaluation
+            # p, n, n2, masks = data #todo fix evaluation
+            p, n, masks = data #todo fix evaluation
             # p0 = p0.cuda();
             p = [x.cuda() for x in p]
             n = [x.cuda() for x in n]

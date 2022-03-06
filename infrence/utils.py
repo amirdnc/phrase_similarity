@@ -1,6 +1,7 @@
 import gzip
 import json
 import os
+import platform
 from collections import Set, Counter, defaultdict
 import spacy
 from nltk.corpus import stopwords
@@ -14,8 +15,10 @@ pronouns = 'I we you he she it they me us you her him it them mine ours yours he
            'themselves all another any anybody anyone anything both each either everybody everyone everything few many most neither nobody none no one nothing one other others several some somebody someone something such'.lower().split(
     ' ')
 
-data_dir = r"D:\reviews"
-
+if 'Windows' in platform.platform():
+    data_dir = r"D:\reviews"
+else:
+    data_dir = r'/home/nlp/amirdnc/data/reviews/'
 stop_words = set(stopwords.words('english'))
 def load_json(path):
     """
@@ -30,6 +33,7 @@ def load_json(path):
 def get_raw_data(data_filename):
     # data_dir = r'/home/nlp/amirdnc/data/reviews'
     in_path = os.path.join(data_dir, data_filename)
+    print(in_path)
     data = [l['reviewText'] for l in load_json(in_path) if 'reviewText' in l]
     return data
 

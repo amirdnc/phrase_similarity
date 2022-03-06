@@ -9,7 +9,7 @@ import os
 cwd = os.getcwd()
 
 sys.path.insert(1, cwd)
-from src.triplet import TrippletModel
+from src.triplet import TrippletModel, TrippletSpanModel
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s]: %(message)s', \
                     datefmt='%m/%d/%Y %I:%M:%S %p', level=logging.INFO)
@@ -41,6 +41,7 @@ def load_state(net, optimizer, scheduler,  load_best=False, base_path="./data/")
 
 def get_trained_model(name, path="./data/"):
     net = TrippletModel(name)
+    net = TrippletSpanModel(name)
     net.cuda()
 
     optimizer = optim.Adam([{"params": net.parameters(), "lr": 0.0007}])
@@ -48,5 +49,6 @@ def get_trained_model(name, path="./data/"):
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[2, 4, 6, 8, 12, 15, 18, 20, 22, \
                                                                       24, 26, 30], gamma=0.8)
 
-    start_epoch, best_pred, amp_checkpoint = load_state(net, optimizer, scheduler, load_best=False, base_path=path)
+    # start_epoch, best_pred, amp_checkpoint = load_state(net, optimizer, scheduler, load_best=False, base_path=path)
+    net.eval()
     return net
