@@ -1,11 +1,22 @@
+import json
 import random
 from collections import defaultdict
 import torch
 import numpy as np
 from scipy.interpolate import interp1d
 import torch.nn.functional as F
+from scipy.spatial.distance import cosine
+from sklearn.decomposition import PCA
 from sklearn.metrics import ndcg_score
+from sklearn.neighbors import NearestNeighbors
 
+
+def clac_cosin(l1, l2):
+    return cosine(l1, l2)
+
+
+def clac_dot(l1, l2):
+    return torch.matmul(l1, l2.T)
 
 def clac_dist_avg(l1, l2):
     l1_avg = torch.sum(l1, dim=0)/l1.size(0)
@@ -34,13 +45,66 @@ def get_interpolation(l):
     l = np.insert(l, 0, 100)
     l_sorted = np.sort(l)
     p = 1. * np.arange(len(l)) / (len(l) - 1)
-    f = interp1d(l_sorted, p)
+    # f = interp1d(l_sorted, p)
+    d = {k: v for k, v in zip(l_sorted, p)}  # interpulation have some trouble when many values has same value
+    f = interp1d(list(d.keys()), list(d.values()))
     return f
 
-def calc_dist_ECDF(l1, l2):
-    dists = torch.cdist(l1, l2, p=2).reshape(-1).cpu().numpy()
+def calc_dist_ECDF(l1, l2, return_dists = False):
+    dists = torch.cdist(l1, l2, p=2).reshape(-1).cpu().detach().numpy()
     interpolation = get_interpolation(dists)
-    return 1 - (sum(interpolation(x) for x in np.arange(0.00001, 5, 0.1))/50)
+    if return_dists:
+        return dists
+    else:
+        return 1 - (sum(interpolation(x) for x in np.arange(0.00001, 5, 0.1))/50)
+
+    def calc_dist(self, l1, l2):
+        dists = torch.cdist(l1, l2, p=2).reshape(-1).cpu().detach().numpy()
+        interpolation = get_interpolation(dists)
+        return 1 - (sum(interpolation(x) for x in np.arange(self.min, self.max, self.step_size))/self.steps)
+
+
+def get_distances_knn(l1, l2, k):
+    nbrs = NearestNeighbors(n_neighbors=k, algorithm='brute', metric='cosine').fit(l1)  #
+    distances, indices = nbrs.kneighbors(l2)
+    return distances, indices
+
+def run_pca(p1_embd, p2_embd):
+    p1_size = p1_embd.shape[0]
+    all_vec = np.concatenate([p1_embd, p2_embd]).T
+    pca = PCA(n_components=2)
+    pca.fit(all_vec)
+    # print(pca.components_)
+    p1_dots = pca.components_[:,:p1_size]
+    p2_dots = pca.components_[:,p1_size:]
+    return p1_dots.T, p2_dots.T
+
+def calc_cosine_ECDF_knn(l1, l2, k=1):
+    if l1.size(0) <= k or l2.size(0) <= k:
+        return 0
+    l1 = l1.cpu().detach().numpy()
+    l2 = l2.cpu().detach().numpy()
+    # l1 ,l2 = run_pca(l1, l2)
+    d12, ind1 = get_distances_knn(l1, l2, k)
+    d21, ind2 = get_distances_knn(l2, l1, k)
+    d11, ind1 = get_distances_knn(l1, l1, k+1)
+    d22, ind2 = get_distances_knn(l2, l2, k+1)
+    # interpolation2 = get_interpolation(np.concatenate([d11[:, 1:].reshape(-1), d22[:, 1:].reshape(-1)]))
+    d1 = d21 - d11[:, 1:]
+    d2 = d12 - d22[:, 1:]
+    interpolation = get_interpolation(np.concatenate([d1.reshape(-1), d2.reshape(-1)]))
+    # return  1 - (sum(interpolation(x) for x in np.arange(0.00001, 0.2, 0.004))/50)
+    # return  1 - (sum(interpolation(x) for x in np.arange(0.00001, 5, 0.1))/50)
+    return (1 - (sum(interpolation(x) for x in np.arange(0.00001, 1, 0.02))/50))  # / (1 - (sum(interpolation2(x) for x in np.arange(0.00001, 1, 0.02))/50))
+
+
+def calc_cosine_ECDF(l1, l2):
+    l1 = F.normalize(l1, p=2)
+    l2 = F.normalize(l2, p=2)
+    # dists2 = torch.cdist(l1, l2, p=2).reshape(-1).cpu().numpy()
+    dists = torch.mm(l1, l2.t()).reshape(-1).cpu().detach().numpy()
+    interpolation = get_interpolation(dists)
+    return (sum(interpolation(x) for x in np.arange(0.00001, 1, 0.02))/50)
 
 def clac_dist_alignment(l1, l2):
     dists = torch.cdist(l1, l2, p=2)
@@ -64,12 +128,31 @@ def get_close(embeddings, g, dist_f):
     for cur in embeddings:
         if cur == g:
             continue
-        dist = dist_f(embeddings[g], embeddings[cur])
+        # if cur == 'jigsaw':
+        #     print('here')
+        # print(cur)
+        dist = dist_f(embeddings[g].reshape(-1, 768), embeddings[cur].reshape(-1, 768))
         if dist < best_dist:
             best_dist = dist
             best_phrase = cur
     return best_phrase
 
+def get_far(embeddings, g, dist_f):
+    best_phrase = None
+    best_dist = 0
+    # print('***')
+    for cur in embeddings:
+        if cur == g:
+            continue
+        # if cur == 'jigsaw':
+        #     print('here')
+        # print(cur)
+        dist = dist_f(embeddings[g].reshape(-1, 768), embeddings[cur].reshape(-1, 768))
+        # print(dist)
+        if dist > best_dist:
+            best_dist = dist
+            best_phrase = cur
+    return best_phrase
 
 def cmpr(dist1, dist2):
     res = 0

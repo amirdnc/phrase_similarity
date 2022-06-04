@@ -38,8 +38,8 @@ if __name__ == "__main__":
         raw_eval = 'Automotive_5.json.gz'
 
 
-        train_path = r"D:\reviews\Arts_Crafts_and_Sewing_5_triplet_train.json"
-        dev_path = r"D:\reviews\Arts_Crafts_and_Sewing_5_triplet_dev.json"
+        train_path = r"D:\reviews\triplets\Arts_Crafts_and_Sewing_5_triplet_train.json"
+        dev_path = r"D:\reviews\triplets\Arts_Crafts_and_Sewing_5_triplet_dev.json"
         gold_eval = r"D:\human\art1500.csv"
         raw_eval = 'Arts_Crafts_and_Sewing_5.json.gz'
     else:
@@ -54,8 +54,8 @@ if __name__ == "__main__":
         gold_eval = r"/home/nlp/amirdnc/data/reviews/art1500.csv"
         raw_eval = 'Arts_Crafts_and_Sewing_5.json.gz'
     parser = ArgumentParser()
-    parser.add_argument("--task", type=str, default='multi_noun_similarity', help='semeval, fewrel, noun_similarity', )
-    # parser.add_argument("--task", type=str, default='double_negative_similarity', help='semeval, fewrel, noun_similarity', )
+    # parser.add_argument("--task", type=str, default='multi_noun_similarity', help='semeval, fewrel, noun_similarity', )
+    parser.add_argument("--task", type=str, default='double_negative_similarity', help='semeval, fewrel, noun_similarity', )
     parser.add_argument("--train_data", type=str,
                         default=train_path, \
                         help="training data .txt file path")
@@ -89,7 +89,7 @@ if __name__ == "__main__":
     parser.add_argument("--infer", type=int, default=0, help="0: Don't infer, 1: Infer")
     parser.add_argument("--val_step", type=int, default=10, help="validation step")
     parser.add_argument('--model', type=str, default='SpanBERT/spanbert-base-cased', help='model string to use')
-    parser.add_argument('--save_path', type=str, default='./data_art_base_once/',
+    parser.add_argument('--save_path', type=str, default='./data_art_base_mask_span/',
                         help='path to save models and tokenizer')
     parser.add_argument('--test_path', type=str, default=gold_eval,
                         help='path for test')

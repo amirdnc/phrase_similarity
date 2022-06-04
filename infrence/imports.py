@@ -41,7 +41,7 @@ def load_state(net, optimizer, scheduler,  load_best=False, base_path="./data/")
 
 def get_trained_model(name, path="./data/"):
     net = TrippletModel(name)
-    net = TrippletSpanModel(name)
+    # net = TrippletSpanModel(name)
     net.cuda()
 
     optimizer = optim.Adam([{"params": net.parameters(), "lr": 0.0007}])

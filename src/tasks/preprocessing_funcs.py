@@ -241,7 +241,7 @@ def tokenize_with_span(tokenizer, l, phrase, mask_id, infrence=False):
     for index, s in enumerate(l):
         sent = tokenizer.encode(s)
         i = sent.index(mask_id)
-        if index <= (len(l)/3 - 1) or infrence:
+        if False and (index <= (len(l)/3 - 1) or infrence): # testing
             sent = sent[:i] + phrase + sent[i+1:]
             length = (len(phrase))
         else:

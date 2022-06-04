@@ -2,8 +2,8 @@ from random import shuffle
 
 import torch
 from torch import nn
-from transformers import AutoModelForMaskedLM
-
+from transformers import AutoModelForMaskedLM, AutoModel
+import torch.nn.functional as F
 
 def norm_to_unit(v):
     qn = torch.norm(v, p=2, dim=1).detach()
@@ -27,7 +27,8 @@ class TrippletModel(nn.Module):
         super(TrippletModel, self).__init__()
         # config = AutoConfig.from_pretrained(name)
         # self.model = AutoModel.from_config(config)
-        self.model = AutoModelForMaskedLM.from_pretrained(name)
+        # self.model = AutoModelForMaskedLM.from_pretrained(name)
+        self.model = AutoModel.from_pretrained(name)
         self.loss = nn.TripletMarginLoss(margin=margin, p=2)
         self.hard_loss = nn.TripletMarginLoss(margin=margin*1.5, p=2)
         self.easy_loss = nn.TripletMarginLoss(margin=margin*0.75, p=2)
@@ -126,3 +127,31 @@ class TrippletSpanModel(TrippletModel):
 # class MultiTrippletModel(TrippletModel):
 #     def __init__(self, name, margin=1.0):
 #         super(MultiTrippletModel, self, name, margin).__init__()
+
+class mini_triplet(nn.Module):
+    def __init__(self, embed, dropout_rate=0.5):
+        super(mini_triplet, self).__init__()
+        self.fc1 = nn.Linear(embed, embed)
+        self.fc2 = nn.Linear(embed, embed)
+        self.dropout = nn.Dropout2d(dropout_rate)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.dropout(x)
+        x = self.fc2(x)
+        return x
+
+
+class combined_model(nn.Module):
+    def __init__(self, embed_model, triplet_model):
+        super(combined_model, self).__init__()
+        self.m1 = embed_model.cuda()
+        self.m2 = triplet_model.cuda()
+
+    def forward(self, input, index):
+        x = self.m1.forward_aux(input, index)
+        x = self.m2(x)
+        return x
+    def forward_aux(self, input, index):
+        return self.forward(input, index)

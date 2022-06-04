@@ -156,8 +156,8 @@ def train_and_fit(args):
 
     logger.info("Starting training process...")
     logger.info("train len is {}".format(train_len))
-    num_steps = train_len/ (torch.cuda.device_count())
-    update_size = int(max(num_steps//3, args.val_step))
+    num_steps = train_len/ (torch.cuda.device_count() * args.batch_size)
+    update_size = int(max(num_steps//4, args.val_step))
     logger.info("update step is {}".format(update_size))
     # eval_sebert(test_loader, net)
     net.eval()
@@ -187,7 +187,8 @@ def train_and_fit(args):
             if args.task == 'double_negative_similarity':
                 if any(x.size()[-1] > 512 for x in n2):
                     continue
-                loss = net(p, n, n2, masks)
+                # loss = net(p, n, n2, masks)
+                loss = net(p, n, masks)  #testing
             else:
                 # loss = net.run_train_multi_reduce(p, n, masks)
                 loss = net(p, n, masks)

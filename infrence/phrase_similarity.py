@@ -131,17 +131,22 @@ def tokenize_sents(tokenizer, cur_sent, mask_id):
     index = [x if len(x) == 1 else [x[0]] for x in index]
     index = torch.tensor(index).cuda()
     return index, encoded_input['input_ids']
+
+
 def embd(final_sents, phrase, tokenizer, model):
     mask_id = tokenizer.convert_tokens_to_ids('[MASK]')
-    batch_size = 50
+    batch_size = 75
     sents = []
     final_sents = prepare_sentence(final_sents, phrase)
+    # print('phrase is: {}'.format(phrase))
+    # if phrase == 'couple colors':
+    #     print('hi')
     for i in range(ceil(len(final_sents) / batch_size)):
         cur_sent = final_sents[batch_size * i:batch_size * (i + 1)]
-        # index, tokenized_sents =tokenize_with_span(tokenizer, cur_sent, phrase, mask_id, infrence=True)
+        # index, tokenized_sents =tokenize_with_span(tokenizer, cur_sent, phrase, mask_id, infrence=True)  #testing
         index, tokenized_sents = tokenize_sents(tokenizer, cur_sent, mask_id)
         # encoded_input = encoded_input.to('cuda')
-        index = torch.tensor(index)
+        # index = torch.tensor(index)
         if index.dim() == 1:
             index = index.unsqueeze(-1)
         with torch.no_grad():
@@ -150,17 +155,22 @@ def embd(final_sents, phrase, tokenizer, model):
             # if len(tokenized_sents) == 1:
             #     print(tokenized_sents)
             index = index.squeeze() #triplet dependent?
+            if index.dim()==1:
+                index = index.unsqueeze(0)
             model_output = model.forward_aux(padded_tensor(tokenized_sents), index.to('cuda')).detach()
 
         sents.append(model_output)
     if len(sents) > 1:
+        sents = [x.squeeze() for x in sents if x.dim()!=2] # testing
+        if any([x.dim()!=2 for x in sents]):
+            print('hi')
         return torch.cat(sents, dim=0) #model sensitive?
     elif len(sents) == 1:
         return sents[0]
-    return torch.zeros((1, 28996))
+    return torch.zeros((1, 768)).cuda()  # testing
+    # return torch.zeros((1, 28996)).cuda()
     # total_embd = torch.cat(sents, dim=0)
     # return (total_embd.sum(0).cpu() / len(final_sents)).numpy()
-
 
 def remove_zeroes(embeddings):
     for k in [x for x in embeddings if torch.sum(embeddings[x]) == 0]:
@@ -326,6 +336,8 @@ def calc_similarity(ns, data, index, docs, glove, tokenizer, model):
 
 def eval_model(gold_path, raw_path, model= None):
     model_name = 'SpanBERT/spanbert-base-cased'
+    # model_name = 'studio-ousia/luke-base'
+    model_name = "whaleloops/phrase-bert"
     if not model:
         model = get_trained_model(model_name, path="./data/")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -349,13 +361,15 @@ if __name__ == '__main__':
     # data_path = r"D:\human\art1500.csv"
     data_path = r"D:\human\automotive1500.csv"
 
+    data_path = r"/home/nlp/amirdnc/data/reviews/art1500.csv"
+    data_path = r"D:\human\art1500.csv"
+
     # raw_path = 'All_Beauty_5.json.gz'
     # raw_path = 'Cell_Phones_and_Accessories_5.json.gz'
-    raw_path = 'Automotive_5.json.gz'
-    # raw_path = 'Arts_Crafts_and_Sewing_5.json.gz'
+    # raw_path = 'Automotive_5.json.gz'
+    raw_path = 'Arts_Crafts_and_Sewing_5.json.gz'
     # clusters_path = r"D:\human\c_cell.json"
     clusters_path = r"D:\human\c_art.json"
 
-    data_path = r"/home/nlp/amirdnc/data/reviews/art1500.csv"
     raw_eval = 'Arts_Crafts_and_Sewing_5.json.gz'
-    # print(eval_model(data_path, raw_path))
+    print(eval_model(data_path, raw_path))
